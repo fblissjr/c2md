@@ -1,6 +1,6 @@
 # c2md
 
-Convert URLs and files to clean markdown.
+Convert content, urls, and files to clean markdown.
 
 ## Install
 
