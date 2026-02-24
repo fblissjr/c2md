@@ -87,3 +87,8 @@ c2md spreadsheet.xlsx             # convert local file
 
 ### Adding new metadata fields
 1. Edit `extract.py:extract_metadata()`
+
+## Development Notes
+
+- c2md was originally prototyped as `c4md` (using crawl4ai). The crawler is now fully custom (`crawl.py`). Reports/findings from c4md test repos need verification before applying -- the architectures diverge significantly.
+- CLI options thread through `main()` -> `_run_deep_crawl()` -> `deep_crawl()` as positional args. When adding new deep-crawl params, all three signatures must be updated.
