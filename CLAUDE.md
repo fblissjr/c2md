@@ -1,6 +1,6 @@
 # c2md - Content to Markdown
 
-last updated: 2026-02-13
+last updated: 2026-02-24
 
 ## Overview
 
@@ -17,7 +17,7 @@ c2md/
   convert.py        -- readability + markdownify -> markdown
   _postprocess.py   -- markdown cleanup pipeline (heading fix, citation dedup, etc.)
   citations.py      -- inline links -> numbered references
-  crawl.py          -- BFS deep crawler (1 level, same-domain)
+  crawl.py          -- BFS deep crawler (configurable depth, same-domain)
   media.py          -- image download, compress, base64 embed
   extract.py        -- metadata, dates, link analysis from HTML
   output.py         -- file writers (md, screenshot, pdf, archive)
@@ -68,7 +68,8 @@ c2md URL --mode screenshot -o out/  # screenshot
 c2md URL --mode pdf -o out/       # PDF
 c2md URL --mode metadata          # JSON metadata to stdout
 c2md URL --mode archive -o out/   # all formats
-c2md URL --deep --max-pages 10    # follow links
+c2md URL --deep --max-pages 10    # follow links (depth 1)
+c2md URL --deep --depth 3         # follow links 3 levels deep
 c2md URL --embed-images           # base64 images in markdown
 c2md report.pdf                   # convert local file
 c2md spreadsheet.xlsx             # convert local file

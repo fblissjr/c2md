@@ -15,16 +15,18 @@ async def deep_crawl(
     start_url: str,
     session: BrowserSession,
     max_pages: int = 10,
+    depth: int = 1,
     url_pattern: str | None = None,
     screenshot: bool = False,
     pdf: bool = False,
 ) -> list[FetchResult]:
-    """Follow links 1 level deep from start_url. Same-domain only.
+    """Follow links up to *depth* levels deep from start_url. Same-domain only.
 
     Args:
         start_url: The seed URL to crawl
         session: An active BrowserSession
         max_pages: Maximum number of pages to fetch (including start)
+        depth: How many link-follow levels (1 = immediate links only)
         url_pattern: Glob pattern to filter discovered URLs
         screenshot: Capture screenshots for each page
         pdf: Capture PDFs for each page
@@ -37,29 +39,39 @@ async def deep_crawl(
     results = [start_result]
     visited = {_normalize_url(start_url)}
 
-    # Extract links from start page
-    discovered = _extract_links(start_result.html, start_url, base_domain)
+    # BFS across depth levels
+    frontier = [start_result]
+    for _level in range(depth):
+        next_frontier = []
+        for page in frontier:
+            if len(results) >= max_pages:
+                break
 
-    # Filter by pattern if specified
-    if url_pattern:
-        discovered = [u for u in discovered if fnmatch.fnmatch(u, url_pattern)]
+            discovered = _extract_links(page.html, page.url, base_domain)
 
-    # BFS one level deep
-    for url in discovered:
-        if len(results) >= max_pages:
+            if url_pattern:
+                discovered = [u for u in discovered if fnmatch.fnmatch(u, url_pattern)]
+
+            for url in discovered:
+                if len(results) >= max_pages:
+                    break
+
+                normalized = _normalize_url(url)
+                if normalized in visited:
+                    continue
+                visited.add(normalized)
+
+                try:
+                    result = await session.fetch(url, screenshot=screenshot, pdf=pdf)
+                    if result.status < 400:
+                        results.append(result)
+                        next_frontier.append(result)
+                except Exception:
+                    continue
+
+        frontier = next_frontier
+        if not frontier or len(results) >= max_pages:
             break
-
-        normalized = _normalize_url(url)
-        if normalized in visited:
-            continue
-        visited.add(normalized)
-
-        try:
-            result = await session.fetch(url, screenshot=screenshot, pdf=pdf)
-            if result.status < 400:
-                results.append(result)
-        except Exception:
-            continue
 
     return results
 

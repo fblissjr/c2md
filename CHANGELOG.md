@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+### Added
+- Configurable `--depth` for deep crawl (1-10, default 1)
+- Multi-level BFS: crawl can now follow links beyond 1 level deep
+
 ## 0.1.0
 
 ### Added

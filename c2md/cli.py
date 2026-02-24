@@ -49,7 +49,9 @@ from c2md._postprocess import clean_markdown  # noqa: E402
 @click.option("-v", "--verbose", is_flag=True, help="Verbose progress output")
 @click.option("--timeout", default=30, help="Page timeout in seconds")
 @click.option("--refs", is_flag=True, help="Add numbered citation references")
-@click.option("--deep", is_flag=True, help="Deep crawl: follow links 1 level deep")
+@click.option("--deep", is_flag=True, help="Deep crawl: follow links")
+@click.option("--depth", default=1, type=click.IntRange(1, 10),
+              help="Max link-follow depth for deep crawl (1-10, default 1)")
 @click.option("--max-pages", default=10, help="Max pages in deep mode")
 @click.option("--sort-by-date", is_flag=True, help="Sort results by date (newest first)")
 @click.option("--limit", default=None, type=int, help="Limit to N results")
@@ -81,6 +83,7 @@ def main(
     timeout: int,
     refs: bool,
     deep: bool,
+    depth: int,
     max_pages: int,
     sort_by_date: bool,
     limit: int | None,
@@ -133,7 +136,7 @@ def main(
     slug = filename or url_to_slug(source)
 
     if verbose:
-        mode_label = mode + (" (deep)" if deep else "")
+        mode_label = mode + (f" (deep, depth={depth})" if deep else "")
         if not raw:
             mode_label += " [readability]"
         console.print(Panel(
@@ -144,7 +147,7 @@ def main(
     if deep:
         results = _run_deep_crawl(
             source, needs_browser, no_headless, timeout, mode, slug,
-            max_pages, url_pattern, raw, selector, verbose,
+            max_pages, depth, url_pattern, raw, selector, verbose,
             screenshot_quality, screenshot_width, dedupe,
             sort_by_date, limit, refs, no_images, embed_images,
             download_images, image_width, output_path,
@@ -367,7 +370,7 @@ def _process_result(
 
 def _run_deep_crawl(
     url: str, needs_browser: bool, no_headless: bool, timeout: int,
-    mode: str, slug: str, max_pages: int, url_pattern: str | None,
+    mode: str, slug: str, max_pages: int, depth: int, url_pattern: str | None,
     raw: bool, selector: str | None, verbose: bool,
     screenshot_quality: int, screenshot_width: int | None,
     dedupe: bool, sort_by_date: bool, limit: int | None,
@@ -387,6 +390,7 @@ def _run_deep_crawl(
             return await deep_crawl(
                 url, session,
                 max_pages=max_pages,
+                depth=depth,
                 url_pattern=url_pattern,
                 screenshot=(mode in ("screenshot", "archive")),
                 pdf=(mode in ("pdf", "archive")),
@@ -398,7 +402,8 @@ def _run_deep_crawl(
     ) as progress:
         if verbose:
             progress.add_task(
-                description=f"Deep crawling (max {max_pages} pages)...", total=None,
+                description=f"Deep crawling (depth={depth}, max {max_pages} pages)...",
+                total=None,
             )
         results = asyncio.run(_crawl())
 
