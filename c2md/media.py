@@ -11,12 +11,20 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
+from c2md.fetch import MAX_IMAGE_BYTES, MAX_REDIRECTS
+
 
 def find_image_urls(markdown: str) -> list[str]:
     """Extract image URLs from markdown text."""
     pattern = r"!\[[^\]]*\]\(([^)]+)\)"
     urls = re.findall(pattern, markdown)
     return [u for u in urls if u.startswith("http")]
+
+
+def _is_image_content_type(headers: dict[str, str]) -> bool:
+    """Check if response Content-Type indicates an image."""
+    content_type = headers.get("content-type", "")
+    return content_type.startswith(("image/", "application/octet-stream"))
 
 
 def download_and_compress_images(
@@ -36,7 +44,7 @@ def download_and_compress_images(
     output_dir.mkdir(parents=True, exist_ok=True)
     url_to_path: dict[str, Path] = {}
 
-    with httpx.Client(timeout=10, follow_redirects=True) as client:
+    with httpx.Client(timeout=10, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         for src in image_urls:
             try:
                 url_hash = hashlib.md5(src.encode()).hexdigest()[:12]
@@ -48,6 +56,12 @@ def download_and_compress_images(
 
                 resp = client.get(src)
                 resp.raise_for_status()
+
+                if not _is_image_content_type(dict(resp.headers)):
+                    continue
+
+                if len(resp.content) > MAX_IMAGE_BYTES:
+                    continue
 
                 img = Image.open(BytesIO(resp.content))
                 if img.mode in ("RGBA", "P"):
@@ -61,7 +75,7 @@ def download_and_compress_images(
                 img.save(local_path, "JPEG", quality=quality, optimize=True)
                 url_to_path[src] = local_path
 
-            except Exception:
+            except (httpx.HTTPError, httpx.TimeoutException, OSError):
                 continue
 
     return url_to_path
@@ -82,11 +96,17 @@ def download_images_as_base64(
 
     url_to_base64: dict[str, str] = {}
 
-    with httpx.Client(timeout=10, follow_redirects=True) as client:
+    with httpx.Client(timeout=10, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         for src in image_urls:
             try:
                 resp = client.get(src)
                 resp.raise_for_status()
+
+                if not _is_image_content_type(dict(resp.headers)):
+                    continue
+
+                if len(resp.content) > MAX_IMAGE_BYTES:
+                    continue
 
                 img = Image.open(BytesIO(resp.content))
                 if img.mode in ("RGBA", "P"):
@@ -102,7 +122,7 @@ def download_images_as_base64(
                 b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
                 url_to_base64[src] = f"data:image/jpeg;base64,{b64}"
 
-            except Exception:
+            except (httpx.HTTPError, httpx.TimeoutException, OSError):
                 continue
 
     return url_to_base64

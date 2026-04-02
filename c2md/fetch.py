@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 
 import httpx
 
+# Safety limits for network responses
+MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50MB for HTML pages
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB per image
+MAX_REDIRECTS = 5
+
 
 @dataclass
 class FetchResult:
@@ -45,7 +50,29 @@ class BrowserSession:
         from playwright.async_api import async_playwright
 
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=[
+                "--disable-features=WebRTC,NetworkService,NetworkServiceInProcess,"
+                "DnsOverHttps,OptimizationHints,MediaRouter,"
+                "DialMediaRouteProvider,NetworkPrediction",
+                "--disable-webrtc",
+                "--disable-dev-shm-usage",
+                "--disable-background-networking",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--disable-sync",
+                "--disable-translate",
+                "--no-first-run",
+                "--disable-component-update",
+                "--dns-prefetch-disable",
+                "--no-pings",
+                "--disable-client-side-phishing-detection",
+                "--disable-domain-reliability",
+                "--safebrowsing-disable-auto-update",
+                "--disable-component-extensions-with-background-pages",
+            ],
+        )
         self._context = await self._browser.new_context(viewport=self.viewport)
         return self
 
@@ -65,9 +92,13 @@ class BrowserSession:
         wait_for: str | None = None,
     ) -> FetchResult:
         """Fetch a URL with the browser, optionally capturing screenshot/PDF."""
+        # Use networkidle for screenshot/PDF (needs full JS rendering),
+        # domcontentloaded for HTML-only (faster, less background traffic)
+        wait_until = "networkidle" if (screenshot or pdf) else "domcontentloaded"
+
         page = await self._context.new_page()
         try:
-            response = await page.goto(url, timeout=self.timeout, wait_until="networkidle")
+            response = await page.goto(url, timeout=self.timeout, wait_until=wait_until)
             status = response.status if response else 0
 
             if wait_for:
@@ -119,13 +150,27 @@ async def fetch_static(
     async with httpx.AsyncClient(
         timeout=timeout,
         follow_redirects=follow_redirects,
+        max_redirects=MAX_REDIRECTS,
         headers=default_headers,
         verify=verify_ssl,
     ) as client:
-        response = await client.get(url)
-        return FetchResult(
-            html=response.text,
-            url=str(response.url),
-            status=response.status_code,
-            headers=dict(response.headers),
-        )
+        async with client.stream("GET", url) as response:
+            chunks = []
+            size = 0
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                size += len(chunk)
+                if size > MAX_RESPONSE_BYTES:
+                    raise httpx.DecodingError(
+                        f"Response exceeds {MAX_RESPONSE_BYTES // (1024 * 1024)}MB size limit"
+                    )
+                chunks.append(chunk)
+
+            content = b"".join(chunks)
+            text = content.decode(response.charset_encoding or "utf-8", errors="replace")
+
+            return FetchResult(
+                html=text,
+                url=str(response.url),
+                status=response.status_code,
+                headers=dict(response.headers),
+            )

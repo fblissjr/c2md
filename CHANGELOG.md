@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+- `--insecure` flag for explicit SSL verification bypass (replaces silent auto-fallback)
+- Response size limits: 50MB for HTML, 20MB per image
+- Content-Type validation for image downloads
+- Redirect cap (max 5) on all HTTP clients
+
+### Changed
+- Chromium launches with hardened flags: disabled DNS prefetch, WebRTC, safe browsing, network prediction, mDNS, pings
+- Browser `wait_until` uses `domcontentloaded` for HTML-only fetches (faster), `networkidle` only for screenshot/PDF
+- Image download exception handling narrowed to network/IO errors only
+
+### Removed
+- Automatic SSL verification fallback (was silently retrying without cert verification)
+
 ## 0.2.0
 
 ### Added

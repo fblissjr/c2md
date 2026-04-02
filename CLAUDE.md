@@ -1,6 +1,6 @@
 # c2md - Content to Markdown
 
-last updated: 2026-02-24
+last updated: 2026-04-02
 
 ## Overview
 
@@ -43,7 +43,7 @@ URL or file path
 3. **markdownify for conversion**: Handles nested HTML correctly (no word-per-line heading bug from html2text).
 4. **stdout by default**: Pipe-friendly. Use `-o` for file output.
 5. **Citations are optional**: `--refs` flag to enable. Not on by default.
-6. **SSL fallback**: Automatically retries without SSL verification if cert verification fails.
+6. **SSL verification**: Enabled by default. Use `--insecure` to bypass cert verification (no automatic fallback).
 
 ## Dependencies
 
@@ -71,6 +71,7 @@ c2md URL --mode archive -o out/   # all formats
 c2md URL --deep --max-pages 10    # follow links (depth 1)
 c2md URL --deep --depth 3         # follow links 3 levels deep
 c2md URL --embed-images           # base64 images in markdown
+c2md URL --insecure               # skip SSL cert verification
 c2md report.pdf                   # convert local file
 c2md spreadsheet.xlsx             # convert local file
 ```

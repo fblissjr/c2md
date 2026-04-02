@@ -70,6 +70,8 @@ from c2md._postprocess import clean_markdown  # noqa: E402
               help="Max screenshot width (resize if larger)")
 @click.option("--dedupe", is_flag=True,
               help="Deduplicate deep crawl results by content fingerprint")
+@click.option("--insecure", is_flag=True,
+              help="Skip SSL certificate verification")
 def main(
     source: str,
     mode: str,
@@ -95,6 +97,7 @@ def main(
     screenshot_quality: int,
     screenshot_width: int | None,
     dedupe: bool,
+    insecure: bool,
 ):
     """Convert URLs and files to clean markdown.
 
@@ -163,7 +166,7 @@ def main(
             progress.add_task(description="Fetching...", total=None)
 
         fetch_result = asyncio.run(
-            _fetch_single(source, needs_browser, no_headless, timeout, mode)
+            _fetch_single(source, needs_browser, no_headless, timeout, mode, insecure)
         )
 
     _process_result(
@@ -193,7 +196,7 @@ def _handle_file(source_path: Path, output_path: str | None, verbose: bool) -> N
 
 async def _fetch_single(
     url: str, needs_browser: bool, no_headless: bool,
-    timeout: int, mode: str,
+    timeout: int, mode: str, insecure: bool = False,
 ):
     """Fetch a single URL."""
     if needs_browser:
@@ -210,13 +213,12 @@ async def _fetch_single(
         import httpx
         from c2md.fetch import fetch_static
         try:
-            return await fetch_static(url, timeout=timeout)
+            return await fetch_static(url, timeout=timeout, verify_ssl=not insecure)
         except httpx.ConnectError as e:
             if "CERTIFICATE_VERIFY_FAILED" in str(e):
-                console.print(
-                    "[yellow]SSL verification failed, retrying without verification[/yellow]",
+                raise click.ClickException(
+                    "SSL certificate verification failed. Use --insecure to bypass."
                 )
-                return await fetch_static(url, timeout=timeout, verify_ssl=False)
             raise
 
 
