@@ -6,9 +6,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-# Safety limits for network responses
 MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50MB for HTML pages
-MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB per image
 MAX_REDIRECTS = 5
 
 
@@ -91,9 +89,11 @@ class BrowserSession:
         pdf: bool = False,
         wait_for: str | None = None,
     ) -> FetchResult:
-        """Fetch a URL with the browser, optionally capturing screenshot/PDF."""
-        # Use networkidle for screenshot/PDF (needs full JS rendering),
-        # domcontentloaded for HTML-only (faster, less background traffic)
+        """Fetch a URL with the browser, optionally capturing screenshot/PDF.
+
+        Uses networkidle for screenshot/PDF (needs full JS rendering),
+        domcontentloaded for HTML-only (faster, less background traffic).
+        """
         wait_until = "networkidle" if (screenshot or pdf) else "domcontentloaded"
 
         page = await self._context.new_page()
@@ -160,7 +160,7 @@ async def fetch_static(
             async for chunk in response.aiter_bytes(chunk_size=8192):
                 size += len(chunk)
                 if size > MAX_RESPONSE_BYTES:
-                    raise httpx.DecodingError(
+                    raise ValueError(
                         f"Response exceeds {MAX_RESPONSE_BYTES // (1024 * 1024)}MB size limit"
                     )
                 chunks.append(chunk)

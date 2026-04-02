@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import click
-import httpx
-import pytest
 from click.testing import CliRunner
 
+from c2md.cli import main
 from c2md.fetch import FetchResult
 
 
 class TestSSLFallback:
     def test_ssl_error_without_insecure_raises(self):
-        """SSL failure should raise ClickException suggesting --insecure."""
-        from c2md.cli import main
-
+        """SSL failure should error with a message suggesting --insecure."""
         runner = CliRunner()
 
-        # The SSL error happens inside _fetch_single, which is called via asyncio.run.
-        # We need to make asyncio.run raise a ClickException (which is what _fetch_single does).
         ssl_click_error = click.ClickException(
             "SSL certificate verification failed. Use --insecure to bypass."
         )
@@ -32,32 +27,33 @@ class TestSSLFallback:
         assert "--insecure" in result.output
 
     def test_insecure_flag_exists(self):
-        """The --insecure flag should be accepted by the CLI."""
-        from c2md.cli import main
-
+        """The --insecure flag should appear in CLI help."""
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
         assert "--insecure" in result.output
 
-    def test_insecure_flag_passes_to_fetch(self):
-        """--insecure should result in verify_ssl=False being passed."""
-        from c2md.cli import main
-
+    def test_insecure_flag_threads_to_fetch_single(self):
+        """--insecure should pass insecure=True to _fetch_single."""
         runner = CliRunner()
 
-        fake_result = FetchResult(
-            html="<html><body>Hello</body></html>",
-            url="https://example.com",
-            status=200,
-        )
+        with patch("c2md.cli._fetch_single", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = FetchResult(
+                html="<html><body>Hello</body></html>",
+                url="https://example.com",
+                status=200,
+            )
+            with patch("c2md.cli.asyncio.run", side_effect=lambda coro: None):
+                # Patch asyncio.run to invoke the coroutine arg and capture _fetch_single call
+                import asyncio
 
-        with patch("c2md.cli.asyncio.run", return_value=fake_result):
-            with patch("c2md.cli._fetch_single") as mock_fetch:
-                # asyncio.run is already patched to return fake_result,
-                # so _fetch_single won't actually be called, but we can
-                # verify the flag is threaded through by checking the call
+                def run_and_capture(coro):
+                    return asyncio.get_event_loop().run_until_complete(coro)
+
+            # Re-patch with a run that actually executes the coroutine
+            with patch("c2md.cli.asyncio.run", side_effect=run_and_capture):
                 result = runner.invoke(main, ["https://example.com", "--insecure"])
 
-        # The command should succeed (not error on unknown flag)
-        # exit_code 0 means the flag was accepted
-        assert result.exit_code == 0 or "--insecure" not in result.output
+            # Verify _fetch_single was called with insecure=True
+            assert mock_fetch.called
+            call_args = mock_fetch.call_args
+            assert call_args[0][5] is True or call_args.kwargs.get("insecure") is True

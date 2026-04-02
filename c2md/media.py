@@ -11,7 +11,9 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-from c2md.fetch import MAX_IMAGE_BYTES, MAX_REDIRECTS
+from c2md.fetch import MAX_REDIRECTS
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB per image
 
 
 def find_image_urls(markdown: str) -> list[str]:
@@ -21,10 +23,33 @@ def find_image_urls(markdown: str) -> list[str]:
     return [u for u in urls if u.startswith("http")]
 
 
-def _is_image_content_type(headers: dict[str, str]) -> bool:
-    """Check if response Content-Type indicates an image."""
-    content_type = headers.get("content-type", "")
-    return content_type.startswith(("image/", "application/octet-stream"))
+def _fetch_and_prepare_image(
+    client: httpx.Client, src: str, max_width: int,
+) -> Image.Image | None:
+    """Fetch a URL, validate it's an image, and return a resized PIL Image.
+
+    Returns None if the response is not a valid image or exceeds size limits.
+    """
+    resp = client.get(src)
+    resp.raise_for_status()
+
+    content_type = resp.headers.get("content-type", "")
+    if not content_type.startswith(("image/", "application/octet-stream")):
+        return None
+
+    if len(resp.content) > MAX_IMAGE_BYTES:
+        return None
+
+    img = Image.open(BytesIO(resp.content))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    if max_width and img.width > max_width:
+        ratio = max_width / img.width
+        new_height = int(img.height * ratio)
+        img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+    return img
 
 
 def download_and_compress_images(
@@ -54,23 +79,9 @@ def download_and_compress_images(
                     url_to_path[src] = local_path
                     continue
 
-                resp = client.get(src)
-                resp.raise_for_status()
-
-                if not _is_image_content_type(dict(resp.headers)):
+                img = _fetch_and_prepare_image(client, src, max_width)
+                if img is None:
                     continue
-
-                if len(resp.content) > MAX_IMAGE_BYTES:
-                    continue
-
-                img = Image.open(BytesIO(resp.content))
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-
-                if max_width and img.width > max_width:
-                    ratio = max_width / img.width
-                    new_height = int(img.height * ratio)
-                    img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
 
                 img.save(local_path, "JPEG", quality=quality, optimize=True)
                 url_to_path[src] = local_path
@@ -99,23 +110,9 @@ def download_images_as_base64(
     with httpx.Client(timeout=10, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         for src in image_urls:
             try:
-                resp = client.get(src)
-                resp.raise_for_status()
-
-                if not _is_image_content_type(dict(resp.headers)):
+                img = _fetch_and_prepare_image(client, src, max_width)
+                if img is None:
                     continue
-
-                if len(resp.content) > MAX_IMAGE_BYTES:
-                    continue
-
-                img = Image.open(BytesIO(resp.content))
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-
-                if max_width and img.width > max_width:
-                    ratio = max_width / img.width
-                    new_height = int(img.height * ratio)
-                    img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
 
                 buffer = BytesIO()
                 img.save(buffer, "JPEG", quality=quality, optimize=True)

@@ -7,8 +7,15 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 from PIL import Image
+
+from c2md.fetch import MAX_REDIRECTS
+from c2md.media import (
+    MAX_IMAGE_BYTES,
+    download_and_compress_images,
+    download_images_as_base64,
+    find_image_urls,
+)
 
 
 def _make_tiny_jpeg() -> bytes:
@@ -19,174 +26,104 @@ def _make_tiny_jpeg() -> bytes:
     return buf.getvalue()
 
 
+def _mock_httpx_client(response: MagicMock) -> tuple[MagicMock, MagicMock]:
+    """Return (mock_cls, mock_client) for patching httpx.Client."""
+    mock_client = MagicMock()
+    mock_client.get.return_value = response
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_cls = MagicMock(return_value=mock_client)
+    return mock_cls, mock_client
+
+
+def _make_response(content: bytes, content_type: str = "image/jpeg") -> MagicMock:
+    """Create a mock httpx response."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.content = content
+    resp.headers = {"content-type": content_type}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
 class TestDownloadAndCompressImages:
     def test_skips_oversized_response(self, tmp_path: Path):
-        from c2md.fetch import MAX_IMAGE_BYTES
-        from c2md.media import download_and_compress_images
+        resp = _make_response(b"x" * (MAX_IMAGE_BYTES + 1))
+        mock_cls, _ = _mock_httpx_client(resp)
 
-        oversized_content = b"x" * (MAX_IMAGE_BYTES + 1)
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = oversized_content
-        mock_resp.headers = {"content-type": "image/jpeg"}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.get.return_value = mock_resp
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             result = download_and_compress_images(
                 ["https://example.com/big.jpg"], tmp_path
             )
-            assert "https://example.com/big.jpg" not in result
+        assert "https://example.com/big.jpg" not in result
 
     def test_skips_non_image_content_type(self, tmp_path: Path):
-        from c2md.media import download_and_compress_images
+        resp = _make_response(b"<html>not an image</html>", "text/html")
+        mock_cls, _ = _mock_httpx_client(resp)
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"<html>not an image</html>"
-        mock_resp.headers = {"content-type": "text/html"}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.get.return_value = mock_resp
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             result = download_and_compress_images(
                 ["https://example.com/fake.jpg"], tmp_path
             )
-            assert "https://example.com/fake.jpg" not in result
+        assert "https://example.com/fake.jpg" not in result
 
     def test_accepts_valid_image(self, tmp_path: Path):
-        from c2md.media import download_and_compress_images
+        resp = _make_response(_make_tiny_jpeg())
+        mock_cls, _ = _mock_httpx_client(resp)
 
-        jpeg_bytes = _make_tiny_jpeg()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = jpeg_bytes
-        mock_resp.headers = {"content-type": "image/jpeg"}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.get.return_value = mock_resp
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             result = download_and_compress_images(
                 ["https://example.com/real.jpg"], tmp_path
             )
-            assert "https://example.com/real.jpg" in result
+        assert "https://example.com/real.jpg" in result
 
     def test_redirect_limit(self, tmp_path: Path):
-        from c2md.fetch import MAX_REDIRECTS
-        from c2md.media import download_and_compress_images
+        mock_cls, mock_client = _mock_httpx_client(MagicMock())
+        mock_client.get.side_effect = httpx.ConnectError("skip")
 
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.side_effect = httpx.ConnectError("skip")
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             download_and_compress_images(
                 ["https://example.com/img.jpg"], tmp_path
             )
-
-            call_kwargs = mock_cls.call_args.kwargs
-            assert call_kwargs.get("max_redirects") == MAX_REDIRECTS
+        assert mock_cls.call_args.kwargs.get("max_redirects") == MAX_REDIRECTS
 
 
 class TestDownloadImagesAsBase64:
     def test_skips_oversized_response(self):
-        from c2md.fetch import MAX_IMAGE_BYTES
-        from c2md.media import download_images_as_base64
+        resp = _make_response(b"x" * (MAX_IMAGE_BYTES + 1))
+        mock_cls, _ = _mock_httpx_client(resp)
 
-        oversized_content = b"x" * (MAX_IMAGE_BYTES + 1)
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = oversized_content
-        mock_resp.headers = {"content-type": "image/jpeg"}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.get.return_value = mock_resp
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             result = download_images_as_base64(["https://example.com/big.jpg"])
-            assert "https://example.com/big.jpg" not in result
+        assert "https://example.com/big.jpg" not in result
 
     def test_skips_non_image_content_type(self):
-        from c2md.media import download_images_as_base64
+        resp = _make_response(b"not an image", "text/html")
+        mock_cls, _ = _mock_httpx_client(resp)
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"not an image"
-        mock_resp.headers = {"content-type": "text/html"}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.get.return_value = mock_resp
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             result = download_images_as_base64(["https://example.com/fake.jpg"])
-            assert "https://example.com/fake.jpg" not in result
+        assert "https://example.com/fake.jpg" not in result
 
     def test_returns_data_uri(self):
-        from c2md.media import download_images_as_base64
+        resp = _make_response(_make_tiny_jpeg())
+        mock_cls, _ = _mock_httpx_client(resp)
 
-        jpeg_bytes = _make_tiny_jpeg()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = jpeg_bytes
-        mock_resp.headers = {"content-type": "image/jpeg"}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("c2md.media.httpx.Client") as mock_cls:
-            mock_client = MagicMock()
-            mock_client.get.return_value = mock_resp
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_cls.return_value = mock_client
-
+        with patch("c2md.media.httpx.Client", mock_cls):
             result = download_images_as_base64(["https://example.com/real.jpg"])
-            uri = result["https://example.com/real.jpg"]
-            assert uri.startswith("data:image/jpeg;base64,")
+        uri = result["https://example.com/real.jpg"]
+        assert uri.startswith("data:image/jpeg;base64,")
 
 
 class TestFindImageUrls:
     def test_extracts_http_urls(self):
-        from c2md.media import find_image_urls
-
         md = "![alt](https://example.com/img.png) and ![](http://other.com/pic.jpg)"
         urls = find_image_urls(md)
         assert "https://example.com/img.png" in urls
         assert "http://other.com/pic.jpg" in urls
 
     def test_ignores_relative_urls(self):
-        from c2md.media import find_image_urls
-
-        md = "![alt](images/local.png)"
-        urls = find_image_urls(md)
-        assert len(urls) == 0
+        assert len(find_image_urls("![alt](images/local.png)")) == 0
 
     def test_ignores_data_uris(self):
-        from c2md.media import find_image_urls
-
-        md = "![alt](data:image/png;base64,abc123)"
-        urls = find_image_urls(md)
-        assert len(urls) == 0
+        assert len(find_image_urls("![alt](data:image/png;base64,abc123)")) == 0
