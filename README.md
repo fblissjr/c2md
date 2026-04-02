@@ -35,6 +35,7 @@ c2md report.pdf                       # local files too
 | `--deep` | Crawl linked pages (same-domain) |
 | `--depth N` | Crawl depth 1-10 (default 1) |
 | `--max-pages N` | Limit crawled pages |
+| `--insecure` | Skip SSL certificate verification |
 | `--mode` | `markdown` / `screenshot` / `pdf` / `metadata` / `archive` |
 | `-o PATH` | Output directory or file |
 

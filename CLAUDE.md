@@ -93,3 +93,16 @@ c2md spreadsheet.xlsx             # convert local file
 
 - c2md was originally prototyped as `c4md` (using crawl4ai). The crawler is now fully custom (`crawl.py`). Reports/findings from c4md test repos need verification before applying -- the architectures diverge significantly.
 - CLI options thread through `main()` -> `_run_deep_crawl()` -> `deep_crawl()` as positional args. When adding new deep-crawl params, all three signatures must be updated.
+
+## Security
+
+- Chromium is launched with hardening flags (fetch.py) to prevent local network scanning (DNS prefetch, WebRTC, mDNS, safe browsing). Do not remove these flags.
+- `wait_until="networkidle"` only for screenshot/PDF; `domcontentloaded` for HTML-only fetches. networkidle causes excessive background traffic.
+- Response size limits: 50MB HTML (fetch.py:MAX_RESPONSE_BYTES), 20MB images (media.py:MAX_IMAGE_BYTES). fetch_static uses streaming to enforce early abort.
+- Never auto-fallback on SSL errors. The `--insecure` flag must be explicit.
+
+## Testing
+
+- `uv run pytest` -- 84 tests, all unit tests, no network calls.
+- Playwright mocks: patch at `playwright.async_api.async_playwright` (the dynamic import site), not at module level.
+- pytest-asyncio in dev deps for async test support.
